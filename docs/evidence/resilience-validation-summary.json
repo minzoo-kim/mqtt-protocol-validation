@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "executed_at": "2026-08-31",
+  "run_id": "20260831T022826-1272384b",
+  "environment": {
+    "python": "3.12.13",
+    "paho_mqtt": "2.1.0",
+    "toxiproxy": "2.12.0",
+    "platform": "Windows ARM64"
+  },
+  "summary": {
+    "total": 2,
+    "passed": 2,
+    "failed": 0
+  },
+  "results": [
+    {
+      "case_id": "TC-MQTT-R001",
+      "requirement_id": "REQ-MQTT-PERSISTENT-SESSION",
+      "status": "passed",
+      "observed": {
+        "received_count": 1,
+        "first_session_present": false,
+        "session_present": true,
+        "resubscribed": false,
+        "queued_while_offline": true,
+        "delivered_qos": 1,
+        "payload_matches": true
+      }
+    },
+    {
+      "case_id": "TC-MQTT-R002",
+      "requirement_id": "REQ-MQTT-CONNECTION-CUT-RECOVERY",
+      "status": "passed",
+      "observed": {
+        "connection_cut_detected": true,
+        "disconnect_reason": "Unspecified error",
+        "received_count": 1,
+        "reconnect_count": 1,
+        "reconnect_attempts": 1,
+        "delivered_qos": 1,
+        "payload_matches": true
+      }
+    }
+  ],
+  "stability": {
+    "runs": 20,
+    "case_executions": 40,
+    "failures": 0
+  },
+  "pytest": {
+    "passed": 20,
+    "coverage_percent": 83.42,
+    "coverage_gate_percent": 80
+  }
+}
