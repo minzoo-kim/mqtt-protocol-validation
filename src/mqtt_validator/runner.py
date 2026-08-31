@@ -7,7 +7,8 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from mqtt_validator.client import MqttProbe, ReceivedMessage
+from mqtt_validator.client import MqttOperationError, MqttProbe, ReceivedMessage
+from mqtt_validator.faults import ToxiproxyController
 from mqtt_validator.models import (
     BrokerConfig,
     EventRecord,
@@ -60,11 +61,13 @@ class SuiteRunner:
         self._active_scenario: Scenario | None = None
         self._probe_counter = 0
         self._executors: dict[str, Callable[[Scenario], dict[str, Any]]] = {
+            "connection_cut_recovery": self._connection_cut_recovery,
             "publish_receive": self._publish_receive,
             "retained": self._retained,
             "duplicate_detection": self._duplicate_detection,
             "malformed_payload": self._malformed_payload,
             "expected_timeout": self._expected_timeout,
+            "persistent_session": self._persistent_session,
             "reconnect": self._reconnect,
             "topic_isolation": self._topic_isolation,
         }
@@ -82,16 +85,27 @@ class SuiteRunner:
             )
         )
 
-    def _probe(self, role: str) -> MqttProbe:
+    def _probe(
+        self,
+        role: str,
+        *,
+        host: str | None = None,
+        port: int | None = None,
+        client_id: str | None = None,
+        clean_session: bool = True,
+    ) -> MqttProbe:
         self._probe_counter += 1
         compact_run_id = self.run_id[-8:]
-        client_id = f"val-{compact_run_id}-{self._probe_counter}-{role[0]}"
+        resolved_client_id = (
+            client_id or f"val-{compact_run_id}-{self._probe_counter}-{role[0]}"
+        )
         broker: BrokerConfig = self.suite.broker
         return MqttProbe(
-            host=broker.host,
-            port=broker.port,
+            host=host or broker.host,
+            port=port or broker.port,
             keepalive=broker.keepalive,
-            client_id=client_id,
+            client_id=resolved_client_id,
+            clean_session=clean_session,
             event_callback=self._emit,
         )
 
@@ -322,6 +336,205 @@ class SuiteRunner:
             publisher.close()
             subscriber.close()
 
+    def _persistent_session(self, scenario: Scenario) -> dict[str, Any]:
+        client_id = f"persist-{self.run_id[-12:]}"
+        subscriber = self._probe(
+            "persistent-subscriber",
+            client_id=client_id,
+            clean_session=False,
+        )
+        publisher = self._probe("publisher")
+        try:
+            subscriber.connect(scenario.timeout_s)
+            first_session_present = subscriber.session_present
+            subscriber.subscribe(
+                scenario.topic, scenario.subscribe_qos, scenario.timeout_s
+            )
+            subscriber.disconnect()
+            self._emit(
+                "persistent_subscriber_offline",
+                {"client_id": client_id, "topic": scenario.topic},
+            )
+
+            publisher.connect(scenario.timeout_s)
+            publisher.publish(
+                scenario.topic,
+                scenario.payload,
+                scenario.qos,
+                timeout_s=scenario.timeout_s,
+            )
+            self._emit(
+                "message_published_while_offline",
+                {"topic": scenario.topic, "qos": scenario.qos},
+            )
+
+            subscriber.reconnect(scenario.timeout_s)
+            resumed_session_present = subscriber.session_present
+            message = subscriber.wait_message(scenario.timeout_s)
+            if message is None:
+                return {
+                    "received_count": 0,
+                    "first_session_present": first_session_present,
+                    "session_present": resumed_session_present,
+                    "resubscribed": False,
+                    "queued_while_offline": False,
+                    "payload_matches": False,
+                }
+            decoded = self._decoded_payload(message, scenario.payload)
+            return {
+                "received_count": 1,
+                "first_session_present": first_session_present,
+                "session_present": resumed_session_present,
+                "resubscribed": False,
+                "queued_while_offline": True,
+                "delivered_qos": message.qos,
+                "payload": decoded,
+                "payload_matches": decoded == scenario.payload,
+            }
+        finally:
+            publisher.close()
+            subscriber.close()
+            cleanup = self._probe(
+                "session-cleanup",
+                client_id=client_id,
+                clean_session=True,
+            )
+            try:
+                cleanup.connect(scenario.timeout_s)
+                self._emit("persistent_session_cleared", {"client_id": client_id})
+            except Exception as exc:
+                self._emit("cleanup_warning", {"error": str(exc)})
+            finally:
+                cleanup.close()
+
+    def _reconnect_with_retry(
+        self, probe: MqttProbe, timeout_s: float
+    ) -> int:
+        deadline = time.monotonic() + timeout_s
+        attempts = 0
+        last_error: Exception | None = None
+        while time.monotonic() < deadline:
+            attempts += 1
+            self._emit("reconnect_attempt", {"attempt": attempts})
+            try:
+                remaining = max(0.1, deadline - time.monotonic())
+                probe.reconnect(min(remaining, 1.0))
+                return attempts
+            except (MqttOperationError, OSError) as exc:
+                last_error = exc
+                time.sleep(0.1)
+        raise MqttOperationError(
+            f"reconnect did not succeed within {timeout_s}s: {last_error}"
+        )
+
+    @staticmethod
+    def _proxy_options(scenario: Scenario) -> dict[str, Any]:
+        proxy = scenario.options.get("proxy")
+        if not isinstance(proxy, dict):
+            raise ValueError(f"{scenario.id}: options.proxy must be a mapping")
+        required = ("api_url", "name", "listen", "upstream", "host", "port")
+        missing = [key for key in required if key not in proxy]
+        if missing:
+            raise ValueError(
+                f"{scenario.id}: options.proxy is missing {', '.join(missing)}"
+            )
+        port = proxy["port"]
+        if not isinstance(port, int) or not 1 <= port <= 65535:
+            raise ValueError(f"{scenario.id}: options.proxy.port is invalid")
+        return proxy
+
+    def _connection_cut_recovery(self, scenario: Scenario) -> dict[str, Any]:
+        proxy = self._proxy_options(scenario)
+        controller = ToxiproxyController(str(proxy["api_url"]))
+        proxy_name = str(proxy["name"])
+        subscriber = self._probe(
+            "faulted-subscriber",
+            host=str(proxy["host"]),
+            port=int(proxy["port"]),
+        )
+        publisher = self._probe("publisher")
+        proxy_created = False
+        proxy_enabled = False
+        try:
+            version = controller.wait_ready(scenario.timeout_s)
+            controller.reset()
+            controller.create_proxy(
+                name=proxy_name,
+                listen=str(proxy["listen"]),
+                upstream=str(proxy["upstream"]),
+            )
+            proxy_created = True
+            proxy_enabled = True
+            self._emit(
+                "fault_proxy_ready",
+                {"proxy": proxy_name, "toxiproxy_version": version},
+            )
+
+            subscriber.connect(scenario.timeout_s)
+            subscriber.subscribe(
+                scenario.topic, scenario.subscribe_qos, scenario.timeout_s
+            )
+            subscriber.prepare_disconnect_observation()
+            controller.set_enabled(proxy_name, False)
+            proxy_enabled = False
+            self._emit(
+                "connection_cut_injected",
+                {"proxy": proxy_name, "mode": "proxy_disabled"},
+            )
+            cut_detected = subscriber.wait_disconnected(scenario.timeout_s)
+
+            controller.set_enabled(proxy_name, True)
+            proxy_enabled = True
+            self._emit("connection_restored", {"proxy": proxy_name})
+            reconnect_attempts = self._reconnect_with_retry(
+                subscriber, scenario.timeout_s
+            )
+            subscriber.subscribe(
+                scenario.topic, scenario.subscribe_qos, scenario.timeout_s
+            )
+
+            publisher.connect(scenario.timeout_s)
+            publisher.publish(
+                scenario.topic,
+                scenario.payload,
+                scenario.qos,
+                timeout_s=scenario.timeout_s,
+            )
+            message = subscriber.wait_message(scenario.timeout_s)
+            if message is None:
+                return {
+                    "connection_cut_detected": cut_detected,
+                    "received_count": 0,
+                    "reconnect_count": 1,
+                    "reconnect_attempts": reconnect_attempts,
+                    "payload_matches": False,
+                }
+            decoded = self._decoded_payload(message, scenario.payload)
+            return {
+                "connection_cut_detected": cut_detected,
+                "disconnect_reason": subscriber.last_disconnect_reason,
+                "received_count": 1,
+                "reconnect_count": 1,
+                "reconnect_attempts": reconnect_attempts,
+                "delivered_qos": message.qos,
+                "payload": decoded,
+                "payload_matches": decoded == scenario.payload,
+            }
+        finally:
+            if proxy_created and not proxy_enabled:
+                try:
+                    controller.set_enabled(proxy_name, True)
+                except Exception as exc:
+                    self._emit("cleanup_warning", {"error": str(exc)})
+            publisher.close()
+            subscriber.close()
+            if proxy_created:
+                try:
+                    controller.delete_proxy(proxy_name)
+                    self._emit("fault_proxy_deleted", {"proxy": proxy_name})
+                except Exception as exc:
+                    self._emit("cleanup_warning", {"error": str(exc)})
+
     def _topic_isolation(self, scenario: Scenario) -> dict[str, Any]:
         subscriber = self._probe("subscriber")
         publisher = self._probe("publisher")
@@ -357,6 +570,7 @@ class SuiteRunner:
             ),
             payload=interpolate(scenario.payload, self.run_id),
             expected=interpolate(scenario.expected, self.run_id),
+            options=interpolate(scenario.options, self.run_id),
         )
 
     def _run_case(self, configured: Scenario) -> ScenarioResult:

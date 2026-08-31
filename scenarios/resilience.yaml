@@ -1,0 +1,54 @@
+version: 1
+suite:
+  name: MQTT communication resilience validation
+  description: Persistent-session recovery and deterministic TCP connection-cut checks
+broker:
+  host: 127.0.0.1
+  port: 1883
+  keepalive: 10
+scenarios:
+  - id: TC-MQTT-R001
+    requirement_id: REQ-MQTT-PERSISTENT-SESSION
+    name: Persistent subscriber receives QoS 1 message queued while offline
+    kind: persistent_session
+    topic: validator/{run_id}/persistent/offline-queue
+    qos: 1
+    subscribe_qos: 1
+    timeout_s: 3.0
+    payload:
+      message_id: persistent-{run_id}
+      state: QUEUED_WHILE_OFFLINE
+    expected:
+      received_count: 1
+      first_session_present: false
+      session_present: true
+      resubscribed: false
+      queued_while_offline: true
+      delivered_qos: 1
+      payload_matches: true
+
+  - id: TC-MQTT-R002
+    requirement_id: REQ-MQTT-CONNECTION-CUT-RECOVERY
+    name: Subscriber detects forced TCP cut and receives after reconnect
+    kind: connection_cut_recovery
+    topic: validator/{run_id}/fault/connection-cut
+    qos: 1
+    subscribe_qos: 1
+    timeout_s: 3.0
+    payload:
+      message_id: connection-cut-{run_id}
+      state: RECOVERED_AFTER_CUT
+    options:
+      proxy:
+        api_url: http://127.0.0.1:8474
+        name: mqtt-cut-{run_id}
+        listen: 0.0.0.0:1884
+        upstream: mosquitto:1883
+        host: 127.0.0.1
+        port: 1884
+    expected:
+      connection_cut_detected: true
+      received_count: 1
+      reconnect_count: 1
+      delivered_qos: 1
+      payload_matches: true

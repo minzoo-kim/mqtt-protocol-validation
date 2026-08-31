@@ -53,6 +53,9 @@ def _parse_scenario(raw: Any, index: int) -> Scenario:
     expected = raw.get("expected", {})
     if not isinstance(expected, dict) or not expected:
         raise ConfigurationError(f"{case_id}: 'expected' must be a non-empty mapping")
+    options = raw.get("options", {})
+    if not isinstance(options, dict):
+        raise ConfigurationError(f"{case_id}: 'options' must be a mapping")
 
     return Scenario(
         id=case_id,
@@ -68,6 +71,7 @@ def _parse_scenario(raw: Any, index: int) -> Scenario:
         publish_topic=(
             str(raw["publish_topic"]) if raw.get("publish_topic") else None
         ),
+        options=options,
     )
 
 

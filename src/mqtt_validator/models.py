@@ -5,11 +5,13 @@ from typing import Any
 
 
 VALID_SCENARIO_KINDS = {
+    "connection_cut_recovery",
     "publish_receive",
     "retained",
     "duplicate_detection",
     "malformed_payload",
     "expected_timeout",
+    "persistent_session",
     "reconnect",
     "topic_isolation",
 }
@@ -35,6 +37,7 @@ class Scenario:
     payload: Any = None
     expected: dict[str, Any] = field(default_factory=dict)
     publish_topic: str | None = None
+    options: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

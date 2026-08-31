@@ -12,3 +12,14 @@ services:
       timeout: 2s
       retries: 10
     restart: unless-stopped
+
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    container_name: mqtt-validator-toxiproxy
+    ports:
+      - "8474:8474"
+      - "1884:1884"
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    restart: unless-stopped

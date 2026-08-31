@@ -47,24 +47,30 @@ class MqttProbe:
         port: int,
         keepalive: int,
         client_id: str,
+        clean_session: bool = True,
         event_callback: EventCallback | None = None,
     ) -> None:
         self.host = host
         self.port = port
         self.keepalive = keepalive
         self.client_id = client_id
+        self.clean_session = clean_session
         self._event_callback = event_callback or (lambda _stage, _details: None)
         self._connected = threading.Event()
+        self._disconnected = threading.Event()
         self._subscribed = threading.Event()
         self._messages: queue.Queue[ReceivedMessage] = queue.Queue()
         self._connect_error: str | None = None
+        self.session_present = False
+        self.last_disconnect_reason: str | None = None
         self._loop_started = False
 
         self._client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
             client_id=client_id,
-            clean_session=True,
+            clean_session=clean_session,
             protocol=mqtt.MQTTv311,
+            reconnect_on_failure=False,
         )
         self._client.on_connect = self._on_connect
         self._client.on_disconnect = self._on_disconnect
@@ -82,7 +88,7 @@ class MqttProbe:
         self,
         _client: mqtt.Client,
         _userdata: Any,
-        _flags: mqtt.ConnectFlags,
+        flags: mqtt.ConnectFlags,
         reason_code: mqtt.ReasonCode,
         _properties: mqtt.Properties | None,
     ) -> None:
@@ -90,13 +96,22 @@ class MqttProbe:
             self._connect_error = str(reason_code)
         else:
             self._connect_error = None
+        self.session_present = bool(getattr(flags, "session_present", False))
         self._connected.set()
-        self._emit("connected", reason_code=str(reason_code))
+        self._disconnected.clear()
+        self._emit(
+            "connected",
+            reason_code=str(reason_code),
+            clean_session=self.clean_session,
+            session_present=self.session_present,
+        )
 
     def _on_disconnect(self, _client: mqtt.Client, _userdata: Any, *args: Any) -> None:
         self._connected.clear()
         reason_code = args[-2] if len(args) >= 2 else "unknown"
-        self._emit("disconnected", reason_code=str(reason_code))
+        self.last_disconnect_reason = str(reason_code)
+        self._disconnected.set()
+        self._emit("disconnected", reason_code=self.last_disconnect_reason)
 
     def _on_subscribe(
         self,
@@ -135,7 +150,9 @@ class MqttProbe:
 
     def connect(self, timeout_s: float) -> None:
         self._connected.clear()
+        self._disconnected.clear()
         self._connect_error = None
+        self.session_present = False
         rc = self._client.connect(self.host, self.port, self.keepalive)
         if rc != mqtt.MQTT_ERR_SUCCESS:
             raise MqttOperationError(f"connect returned {mqtt.error_string(rc)}")
@@ -193,6 +210,16 @@ class MqttProbe:
             self._emit("message_timeout", timeout_s=timeout_s)
             return None
 
+    def prepare_disconnect_observation(self) -> None:
+        self._disconnected.clear()
+        self.last_disconnect_reason = None
+
+    def wait_disconnected(self, timeout_s: float) -> bool:
+        disconnected = self._disconnected.wait(timeout_s)
+        if not disconnected:
+            self._emit("disconnect_timeout", timeout_s=timeout_s)
+        return disconnected
+
     def disconnect(self) -> None:
         if not self._loop_started:
             return
@@ -204,9 +231,12 @@ class MqttProbe:
 
     def reconnect(self, timeout_s: float) -> None:
         if self._loop_started:
-            raise MqttOperationError("disconnect before reconnecting the probe")
+            self._client.loop_stop()
+            self._loop_started = False
         self._connected.clear()
+        self._disconnected.clear()
         self._connect_error = None
+        self.session_present = False
         rc = self._client.reconnect()
         if rc != mqtt.MQTT_ERR_SUCCESS:
             raise MqttOperationError(f"reconnect returned {mqtt.error_string(rc)}")

@@ -32,3 +32,26 @@ def test_full_mvp_suite_against_mosquitto(tmp_path: Path) -> None:
         if result.status == "failed"
     ]
     assert all(path.is_file() for path in paths.values())
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    os.getenv("MQTT_INTEGRATION") != "1",
+    reason="set MQTT_INTEGRATION=1 with Mosquitto and Toxiproxy running",
+)
+def test_resilience_suite_against_mosquitto_and_toxiproxy(tmp_path: Path) -> None:
+    suite = load_suite(PROJECT_ROOT / "scenarios" / "resilience.yaml")
+
+    report = SuiteRunner(suite).run()
+    paths = write_all_reports(report, tmp_path / "resilience")
+
+    assert report.failed == 0, [
+        {
+            "case_id": result.case_id,
+            "error": result.error,
+            "mismatches": result.mismatches,
+        }
+        for result in report.results
+        if result.status == "failed"
+    ]
+    assert all(path.is_file() for path in paths.values())

@@ -16,11 +16,16 @@ def main() -> int:
         description="Repeat the MQTT MVP suite to detect state leakage or race failures."
     )
     parser.add_argument("--runs", type=int, default=20)
+    parser.add_argument(
+        "--suite",
+        type=Path,
+        default=PROJECT_ROOT / "scenarios" / "mvp.yaml",
+    )
     args = parser.parse_args()
     if args.runs < 1:
         parser.error("--runs must be at least 1")
 
-    suite = load_suite(PROJECT_ROOT / "scenarios" / "mvp.yaml")
+    suite = load_suite(args.suite)
     failures: list[dict[str, object]] = []
     started = time.perf_counter()
     for run_number in range(1, args.runs + 1):

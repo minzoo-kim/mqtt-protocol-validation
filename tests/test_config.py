@@ -17,6 +17,17 @@ def test_mvp_suite_has_ten_traceable_cases() -> None:
     assert all(case.requirement_id.startswith("REQ-MQTT-") for case in suite.scenarios)
 
 
+def test_resilience_suite_has_two_fault_and_session_cases() -> None:
+    suite = load_suite(PROJECT_ROOT / "scenarios" / "resilience.yaml")
+
+    assert [case.kind for case in suite.scenarios] == [
+        "persistent_session",
+        "connection_cut_recovery",
+    ]
+    assert all(case.options == {} for case in suite.scenarios[:1])
+    assert suite.scenarios[1].options["proxy"]["port"] == 1884
+
+
 def test_rejects_invalid_qos(tmp_path: Path) -> None:
     scenario_file = tmp_path / "invalid.yaml"
     scenario_file.write_text(
