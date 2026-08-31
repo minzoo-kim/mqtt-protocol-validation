@@ -106,9 +106,15 @@ class MqttProbe:
             session_present=self.session_present,
         )
 
-    def _on_disconnect(self, _client: mqtt.Client, _userdata: Any, *args: Any) -> None:
+    def _on_disconnect(
+        self,
+        _client: mqtt.Client,
+        _userdata: Any,
+        _disconnect_flags: mqtt.DisconnectFlags,
+        reason_code: mqtt.ReasonCode,
+        _properties: mqtt.Properties | None,
+    ) -> None:
         self._connected.clear()
-        reason_code = args[-2] if len(args) >= 2 else "unknown"
         self.last_disconnect_reason = str(reason_code)
         self._disconnected.set()
         self._emit("disconnected", reason_code=self.last_disconnect_reason)
@@ -159,11 +165,14 @@ class MqttProbe:
         self._client.loop_start()
         self._loop_started = True
         if not self._connected.wait(timeout_s):
+            self.disconnect()
             raise MqttOperationError(
                 f"connection to {self.host}:{self.port} timed out after {timeout_s}s"
             )
         if self._connect_error:
-            raise MqttOperationError(f"broker rejected connection: {self._connect_error}")
+            connect_error = self._connect_error
+            self.disconnect()
+            raise MqttOperationError(f"broker rejected connection: {connect_error}")
 
     def subscribe(self, topic: str, qos: int, timeout_s: float) -> None:
         self._subscribed.clear()
@@ -243,9 +252,12 @@ class MqttProbe:
         self._client.loop_start()
         self._loop_started = True
         if not self._connected.wait(timeout_s):
+            self.disconnect()
             raise MqttOperationError(f"reconnect timed out after {timeout_s}s")
         if self._connect_error:
-            raise MqttOperationError(f"broker rejected reconnect: {self._connect_error}")
+            connect_error = self._connect_error
+            self.disconnect()
+            raise MqttOperationError(f"broker rejected reconnect: {connect_error}")
 
     def close(self) -> None:
         try:
