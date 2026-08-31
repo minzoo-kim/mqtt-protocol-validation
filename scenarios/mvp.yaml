@@ -1,0 +1,160 @@
+version: 1
+suite:
+  name: MQTT protocol validation MVP
+  description: Requirement-traceable protocol behavior checks for a local Mosquitto broker
+broker:
+  host: 127.0.0.1
+  port: 1883
+  keepalive: 30
+scenarios:
+  - id: TC-MQTT-001
+    requirement_id: REQ-MQTT-QOS0
+    name: QoS 0 healthy-path delivery
+    kind: publish_receive
+    topic: validator/{run_id}/qos0
+    qos: 0
+    subscribe_qos: 0
+    timeout_s: 2.0
+    payload:
+      message_id: qos0-{run_id}
+      value: 10
+    expected:
+      received_count: 1
+      delivered_qos: 0
+      payload_matches: true
+
+  - id: TC-MQTT-002
+    requirement_id: REQ-MQTT-QOS1
+    name: QoS 1 acknowledged delivery
+    kind: publish_receive
+    topic: validator/{run_id}/qos1
+    qos: 1
+    subscribe_qos: 1
+    timeout_s: 2.0
+    payload:
+      message_id: qos1-{run_id}
+      value: 20
+    expected:
+      received_count: 1
+      delivered_qos: 1
+      payload_matches: true
+
+  - id: TC-MQTT-003
+    requirement_id: REQ-MQTT-QOS2
+    name: QoS 2 exactly-once observation
+    kind: publish_receive
+    topic: validator/{run_id}/qos2
+    qos: 2
+    subscribe_qos: 2
+    timeout_s: 2.0
+    payload:
+      message_id: qos2-{run_id}
+      value: 30
+    expected:
+      received_count: 1
+      delivered_qos: 2
+      payload_matches: true
+
+  - id: TC-MQTT-004
+    requirement_id: REQ-MQTT-RETAIN
+    name: New subscriber receives retained state
+    kind: retained
+    topic: validator/{run_id}/retained
+    qos: 1
+    subscribe_qos: 1
+    timeout_s: 2.0
+    payload:
+      message_id: retained-{run_id}
+      state: READY
+    expected:
+      received_count: 1
+      retain: true
+      payload_matches: true
+
+  - id: TC-MQTT-005
+    requirement_id: REQ-MQTT-DUPLICATE
+    name: Duplicate application message ID is detected
+    kind: duplicate_detection
+    topic: validator/{run_id}/duplicate
+    qos: 1
+    subscribe_qos: 1
+    timeout_s: 2.0
+    payload:
+      message_id: duplicate-{run_id}
+      value: 50
+    expected:
+      raw_count: 2
+      unique_count: 1
+      duplicate_count: 1
+
+  - id: TC-MQTT-006
+    requirement_id: REQ-MQTT-PAYLOAD
+    name: Malformed JSON payload is rejected with a reason
+    kind: malformed_payload
+    topic: validator/{run_id}/malformed
+    qos: 1
+    subscribe_qos: 1
+    timeout_s: 2.0
+    payload: '{"message_id":"broken-{run_id}",'
+    expected:
+      rejected: true
+      error_type: JSONDecodeError
+
+  - id: TC-MQTT-007
+    requirement_id: REQ-MQTT-TIMEOUT
+    name: Missing message is classified as expected timeout
+    kind: expected_timeout
+    topic: validator/{run_id}/timeout
+    qos: 0
+    subscribe_qos: 0
+    timeout_s: 0.8
+    expected:
+      received_count: 0
+      timed_out: true
+
+  - id: TC-MQTT-008
+    requirement_id: REQ-MQTT-RECONNECT
+    name: Subscriber recovers after disconnect and reconnect
+    kind: reconnect
+    topic: validator/{run_id}/reconnect
+    qos: 1
+    subscribe_qos: 1
+    timeout_s: 2.0
+    payload:
+      message_id: reconnect-{run_id}
+      state: RECOVERED
+    expected:
+      received_count: 1
+      reconnect_count: 1
+      payload_matches: true
+
+  - id: TC-MQTT-009
+    requirement_id: REQ-MQTT-TOPIC
+    name: Non-matching topic is not delivered
+    kind: topic_isolation
+    topic: validator/{run_id}/target
+    publish_topic: validator/{run_id}/other
+    qos: 1
+    subscribe_qos: 1
+    timeout_s: 0.8
+    payload:
+      message_id: isolated-{run_id}
+    expected:
+      received_count: 0
+      timed_out: true
+
+  - id: TC-MQTT-010
+    requirement_id: REQ-MQTT-QOS-NEGOTIATION
+    name: Delivered QoS follows publisher/subscriber minimum
+    kind: publish_receive
+    topic: validator/{run_id}/qos-negotiation
+    qos: 2
+    subscribe_qos: 1
+    timeout_s: 2.0
+    payload:
+      message_id: negotiation-{run_id}
+      value: 100
+    expected:
+      received_count: 1
+      delivered_qos: 1
+      payload_matches: true
