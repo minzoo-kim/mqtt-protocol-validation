@@ -3,7 +3,7 @@ services:
     image: eclipse-mosquitto:2.0
     container_name: mqtt-validator-broker
     ports:
-      - "1883:1883"
+      - "127.0.0.1:1883:1883"
     volumes:
       - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     healthcheck:
@@ -17,8 +17,8 @@ services:
     image: ghcr.io/shopify/toxiproxy:2.12.0
     container_name: mqtt-validator-toxiproxy
     ports:
-      - "8474:8474"
-      - "1884:1884"
+      - "127.0.0.1:8474:8474"
+      - "127.0.0.1:1884:1884"
     depends_on:
       mosquitto:
         condition: service_healthy
