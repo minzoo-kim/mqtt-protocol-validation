@@ -1,6 +1,6 @@
-# 처음 배우는 MQTT와 이 프로젝트 사용법
+# MQTT 개념과 이 프로젝트의 검증 흐름
 
-이 문서는 MQTT, Docker, 테스트 자동화를 처음 접하는 사람을 위한 설명서입니다. 명령을 외우기 전에 “무엇을 왜 검사하는가”부터 이해하는 것이 목표입니다.
+이 문서는 MQTT 용어 정의부터 실행, 결과 확인, GitHub Actions 연동까지의 흐름을 순서대로 정리한 기술 설명서입니다. 명령보다 무엇을 왜 검사하는지를 먼저 다룹니다.
 
 ## 1. 이 프로젝트를 한 문장으로 설명하면
 
@@ -250,7 +250,7 @@ docker compose ps
 
 ### 6.4 MQTT 테스트 10개 실행
 
-가상환경은 이미 만들어져 있으므로 다음 명령을 실행합니다.
+README의 설치 단계를 마친 상태에서 다음 명령을 실행합니다.
 
 ```powershell
 .\.venv\Scripts\python.exe -m mqtt_validator run scenarios\mvp.yaml --output-dir reports
@@ -414,6 +414,12 @@ pytest와 MQTT 기본 10개·복구 2개 TC 실행
 7. 결과 리포트를 artifact로 업로드합니다.
 8. 실패했다면 Mosquitto log를 출력합니다.
 9. 마지막에 container를 종료합니다.
+
+워크플로에는 다음 보안 설정을 적용했습니다.
+
+- `GITHUB_TOKEN`에 `contents: read` 권한만 부여합니다.
+- checkout 단계에서 `persist-credentials: false`로 자격증명을 러너에 남기지 않습니다.
+- 사용하는 Action은 태그가 아니라 커밋 SHA로 고정해, 태그가 바뀌어도 실행되는 코드가 바뀌지 않도록 했습니다.
 
 GitHub 공식 문서에서도 Actions를 repository 안에서 build, test, deployment workflow를 자동 실행하는 CI/CD 플랫폼으로 설명합니다. workflow 파일은 `.github/workflows` 폴더에 있어야 GitHub가 인식합니다.
 
