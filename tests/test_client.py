@@ -4,7 +4,12 @@ from unittest.mock import Mock
 import paho.mqtt.client as mqtt
 import pytest
 
-from mqtt_validator.client import MqttOperationError, MqttProbe, encode_payload
+from mqtt_validator.client import (
+    MqttOperationError,
+    MqttProbe,
+    encode_payload,
+    payload_for_log,
+)
 
 
 def make_probe(events: list[tuple[str, dict[str, object]]] | None = None) -> MqttProbe:
@@ -35,6 +40,11 @@ def test_encode_payload_preserves_bytes_without_copying() -> None:
     payload = b"\x00\xffraw"
 
     assert encode_payload(payload) is payload
+
+
+def test_payload_for_log_keeps_text_and_safely_previews_binary() -> None:
+    assert payload_for_log("안전한 로그".encode("utf-8")) == "안전한 로그"
+    assert payload_for_log(b"\x00\xffraw") == "<binary 5 bytes: 00ff726177>"
 
 
 def test_wait_message_timeout_returns_none_and_emits_diagnostic() -> None:
@@ -110,6 +120,45 @@ def test_subscribe_timeout_is_reported_with_topic() -> None:
         match=r"subscription to validator/unit timed out after 0s",
     ):
         probe.subscribe("validator/unit", qos=1, timeout_s=0)
+
+
+def test_subscribe_rejection_is_not_reported_as_ready() -> None:
+    events: list[tuple[str, dict[str, object]]] = []
+    probe = make_probe(events)
+    failure = Mock(is_failure=True)
+    failure.__str__ = Mock(return_value="Not authorized")
+
+    def reject_subscription(_topic: str, qos: int) -> tuple[int, int]:
+        assert qos == 1
+        probe._on_subscribe(
+            probe._client,
+            None,
+            17,
+            [failure],  # type: ignore[list-item]
+            None,
+        )
+        return mqtt.MQTT_ERR_SUCCESS, 17
+
+    probe._client.subscribe = Mock(  # type: ignore[method-assign]
+        side_effect=reject_subscription
+    )
+
+    with pytest.raises(
+        MqttOperationError,
+        match=r"broker rejected subscription to validator/unit: Not authorized",
+    ):
+        probe.subscribe("validator/unit", qos=1, timeout_s=0)
+
+    assert events[-1] == (
+        "subscribed",
+        {
+            "client_id": "unit-probe",
+            "message_id": 17,
+            "reason_codes": ["Not authorized"],
+            "success": False,
+        },
+    )
+    assert all(stage != "subscription_ready" for stage, _details in events)
 
 
 def test_publish_without_acknowledgement_is_reported() -> None:

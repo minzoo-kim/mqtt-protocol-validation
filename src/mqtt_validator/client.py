@@ -26,6 +26,16 @@ class ReceivedMessage:
         return self.payload.decode("utf-8")
 
 
+def payload_for_log(payload: bytes) -> str:
+    """Render payloads for diagnostics without assuming they are UTF-8 text."""
+    try:
+        return payload.decode("utf-8")
+    except UnicodeDecodeError:
+        preview = payload[:32].hex()
+        suffix = "..." if len(payload) > 32 else ""
+        return f"<binary {len(payload)} bytes: {preview}{suffix}>"
+
+
 EventCallback = Callable[[str, dict[str, Any]], None]
 
 
@@ -59,6 +69,7 @@ class MqttProbe:
         self._connected = threading.Event()
         self._disconnected = threading.Event()
         self._subscribed = threading.Event()
+        self._subscribe_error: str | None = None
         self._messages: queue.Queue[ReceivedMessage] = queue.Queue()
         self._connect_error: str | None = None
         self.session_present = False
@@ -127,11 +138,18 @@ class MqttProbe:
         reason_code_list: list[mqtt.ReasonCode],
         _properties: mqtt.Properties | None,
     ) -> None:
+        failures = [
+            str(code)
+            for code in reason_code_list
+            if getattr(code, "is_failure", False)
+        ]
+        self._subscribe_error = ", ".join(failures) if failures else None
         self._subscribed.set()
         self._emit(
             "subscribed",
             message_id=mid,
             reason_codes=[str(code) for code in reason_code_list],
+            success=not failures,
         )
 
     def _on_message(
@@ -151,7 +169,7 @@ class MqttProbe:
             qos=received.qos,
             retain=received.retain,
             dup=received.dup,
-            payload=received.text,
+            payload=payload_for_log(received.payload),
         )
 
     def connect(self, timeout_s: float) -> None:
@@ -176,12 +194,17 @@ class MqttProbe:
 
     def subscribe(self, topic: str, qos: int, timeout_s: float) -> None:
         self._subscribed.clear()
+        self._subscribe_error = None
         rc, mid = self._client.subscribe(topic, qos=qos)
         if rc != mqtt.MQTT_ERR_SUCCESS:
             raise MqttOperationError(f"subscribe returned {mqtt.error_string(rc)}")
         if not self._subscribed.wait(timeout_s):
             raise MqttOperationError(
                 f"subscription to {topic} timed out after {timeout_s}s"
+            )
+        if self._subscribe_error:
+            raise MqttOperationError(
+                f"broker rejected subscription to {topic}: {self._subscribe_error}"
             )
         self._emit("subscription_ready", topic=topic, qos=qos, message_id=mid)
 
@@ -208,7 +231,7 @@ class MqttProbe:
             topic=topic,
             qos=qos,
             retain=retain,
-            payload=encoded.decode("utf-8"),
+            payload=payload_for_log(encoded),
             message_id=info.mid,
         )
 

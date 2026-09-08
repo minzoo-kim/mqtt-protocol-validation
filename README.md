@@ -250,3 +250,9 @@ persistent session은 동일 Python client 객체의 reconnect 범위에서 검�
 
 Toxiproxy는 [Shopify의 공식 Toxiproxy 프로젝트](https://github.com/Shopify/toxiproxy),
 persistent session 동작은 [Eclipse Paho Python client 문서](https://eclipse.dev/paho/files/paho.mqtt.python/html/client.html)를 기준으로 구현했습니다.
+
+---
+
+## 라이선스
+
+이 저장소의 코드는 [MIT License](LICENSE)로 제공합니다.

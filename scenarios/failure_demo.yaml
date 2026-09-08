@@ -9,7 +9,7 @@ broker:
 scenarios:
   - id: TC-MQTT-FAIL-001
     requirement_id: REQ-MQTT-QOS1
-    name: Intentional payload mismatch for report demonstration
+    name: Intentional delivered QoS mismatch for report demonstration
     kind: publish_receive
     topic: validator/{run_id}/failure-demo
     qos: 1
