@@ -8,12 +8,13 @@ YAML 시나리오를 읽어 Mosquitto에 publisher와 subscriber를 구성하고
 | 항목 | 결과 |
 |---|---|
 | 테스트케이스 | 기본 10개 · 장애 복구 2개 · 의도적 실패 1개 |
-| pytest | 20 passed |
+| pytest | 22 passed ([GitHub Actions](https://github.com/minzoo-kim/mqtt-protocol-validation/actions/runs/34199471545), `503f1a8`) |
 | YAML suite | 기본 10 passed · 복구 2 passed · 의도적 실패 1 failed (exit code 1) |
 | 반복 안정성 | 복구 suite 20회 반복, 총 40 케이스 failure 0 |
-| statement coverage | 83.42% (게이트 80%) |
+| statement coverage | 83.71% (GitHub Actions, 게이트 80%) |
 
 검증 환경은 Windows ARM64, Python 3.12, Docker Desktop이며 Mosquitto 2.x와 Toxiproxy 2.12.0을 사용했습니다.
+최신 CI는 Ubuntu와 Python 3.12에서 단위·통합 테스트 22개, 기본 suite 10개와 복구 suite 2개를 통과했습니다.
 상세 증적은 [`docs/evidence/RESILIENCE_VALIDATION_2026-08-31.md`](docs/evidence/RESILIENCE_VALIDATION_2026-08-31.md)와
 machine-readable [`resilience-validation-summary.json`](docs/evidence/resilience-validation-summary.json)에 있습니다.
 

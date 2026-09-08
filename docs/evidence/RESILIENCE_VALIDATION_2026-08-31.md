@@ -2,6 +2,11 @@
 
 실행일: 2026-08-31 (KST)
 
+> 최신 코드 검증: 커밋 [`503f1a8`](https://github.com/minzoo-kim/mqtt-protocol-validation/commit/503f1a8be5e09d48c8eb5e6bb8b013036d2f34bf),
+> [GitHub Actions 실행 34199471545](https://github.com/minzoo-kim/mqtt-protocol-validation/actions/runs/34199471545)에서
+> pytest 22개, 기본 YAML suite 10개, 복구 YAML suite 2개가 통과했고 statement coverage는 83.71%였습니다.
+> 아래 20회 반복 안정성 결과는 2026-08-31에 별도로 수행한 기록입니다.
+
 ## 환경
 
 - Windows ARM64
